@@ -67,6 +67,10 @@ async def get_config_entries(
     return ()
 
 
+# ---------------------------------------------------------------------------
+# Model conversion helpers
+# ---------------------------------------------------------------------------
+
 def _image(url: str | None, instance_id: str) -> MediaItemImage | None:
     if not url:
         return None
@@ -78,6 +82,7 @@ def _artist_mapping(name: str, domain: str) -> ItemMapping:
 
 
 def _to_track(t, domain: str, instance_id: str) -> Track:
+    """Convert a tutubo MusicTrack/MusicVideo to a MA Track."""
     watch_url = t.watch_url
     track = Track(
         item_id=watch_url,
@@ -89,7 +94,7 @@ def _to_track(t, domain: str, instance_id: str) -> Track:
         duration=int(t.length or 0),
     )
     artist_name = t.artist or "Unknown"
-    # Use canonical ytm:artist:{browseId} if the raw data carries it
+    # Prefer the stable browseId as the artist item_id when available.
     raw_artists = getattr(t, "_raw_data", {}).get("artists") or []
     artist_browse_id = raw_artists[0].get("id") if raw_artists else None
     artist_id = f"ytm:artist:{artist_browse_id}" if artist_browse_id else artist_name
@@ -103,7 +108,6 @@ def _to_track(t, domain: str, instance_id: str) -> Track:
 
 
 def _thumb_url(raw: dict) -> str | None:
-    """Extract best thumbnail URL from a ytmusicapi dict (search or API response)."""
     thumbs = raw.get("thumbnails") or raw.get("thumbnail") or []
     if isinstance(thumbs, list) and thumbs:
         return thumbs[-1].get("url")
@@ -132,7 +136,6 @@ def _to_album(raw: dict, browse_id: str, domain: str, instance_id: str) -> Album
 
 def _to_artist(raw: dict, browse_id: str, domain: str, instance_id: str) -> Artist:
     item_id = f"ytm:artist:{browse_id}"
-    # "artist" key in search results; "name" key in get_artist() response
     name = raw.get("artist") or raw.get("name") or "Unknown"
     artist = Artist(
         item_id=item_id,
@@ -179,6 +182,10 @@ def _extract_stream_url(watch_url: str) -> str:
         return info.get("url", "")
 
 
+# ---------------------------------------------------------------------------
+# Provider
+# ---------------------------------------------------------------------------
+
 class YouTubeMusicProvider(MusicProvider):
     """Music Assistant provider for YouTube Music via tutubo."""
 
@@ -189,15 +196,24 @@ class YouTubeMusicProvider(MusicProvider):
     async def handle_async_init(self) -> None:
         try:
             from tutubo import YoutubeSearch  # noqa: PLC0415
-            from tutubo.ytmus import search_yt_music, _get_ytmus  # noqa: PLC0415
-            self._search_cls = YoutubeSearch
-            self._search_yt_music = search_yt_music
+            from tutubo.ytmus import (  # noqa: PLC0415
+                MusicTrack, MusicVideo, MusicAlbum, MusicArtist, MusicPlaylist,
+                get_album, _get_ytmus,
+            )
+            self._YoutubeSearch = YoutubeSearch
+            self._MusicTrack = MusicTrack
+            self._MusicVideo = MusicVideo
+            self._MusicAlbum = MusicAlbum
+            self._MusicArtist = MusicArtist
+            self._MusicPlaylist = MusicPlaylist
+            self._get_album = get_album
             self._get_ytmus = _get_ytmus
         except ImportError as err:
             raise ProviderUnavailableError("tutubo not installed") from err
-        # Cache track metadata keyed by watch URL — populated during search/browse
+        # Keyed by watch URL — populated during search so get_track() has full metadata.
         self._track_cache: dict[str, Track] = {}
-        self._album_playlist_map: dict[str, str] = {}  # browse_id → playlist_id
+        # browse_id → playlistId — used to prefer the stable playlist path for albums.
+        self._album_playlist_map: dict[str, str] = {}
 
     async def search(
         self, search_query: str, media_types: list[MediaType], limit: int = 10
@@ -205,35 +221,39 @@ class YouTubeMusicProvider(MusicProvider):
         result = SearchResults()
 
         def _do():
-            from tutubo.ytmus import MusicTrack, MusicAlbum, MusicArtist, MusicPlaylist  # noqa: PLC0415
+            s = self._YoutubeSearch(search_query)
             tracks, albums, artists, playlists = [], [], [], []
-            # search_yt_music fetches full album/artist/playlist data per result — too slow for
-            # search. Use the ytmusicapi search results directly without the extra get_* calls.
-            ytm = self._get_ytmus()
-            for r in ytm.search(search_query):
-                rtype = r.get("resultType")
-                if rtype == "song" and MediaType.TRACK in media_types and len(tracks) < limit:
-                    tracks.append(MusicTrack(r))
-                elif rtype == "video" and MediaType.TRACK in media_types and len(tracks) < limit:
-                    tracks.append(MusicTrack(r))
-                elif rtype == "album" and MediaType.ALBUM in media_types and len(albums) < limit:
-                    albums.append((r, r.get("browseId", "")))
-                elif rtype == "artist" and MediaType.ARTIST in media_types and len(artists) < limit:
-                    artists.append((r, r.get("browseId", "")))
-                elif rtype == "playlist" and MediaType.PLAYLIST in media_types and len(playlists) < limit:
-                    playlists.append((r, r.get("browseId", "")))
-                if len(tracks) + len(albums) + len(artists) + len(playlists) >= limit * len(media_types):
-                    break
+
+            if MediaType.TRACK in media_types:
+                for t in s.iterate_music_tracks(max_res=limit):
+                    tracks.append(t)
+
+            if MediaType.ALBUM in media_types:
+                for a in s.iterate_music_albums(max_res=limit):
+                    bid = getattr(a, "_raw_data", {}).get("browseId", "")
+                    albums.append((a._raw_data, bid))
+
+            if MediaType.ARTIST in media_types:
+                for a in s.iterate_music_artists(max_res=limit):
+                    bid = getattr(a, "_raw_data", {}).get("browseId", "")
+                    artists.append((a._raw_data, bid))
+
+            if MediaType.PLAYLIST in media_types:
+                for p in s.iterate_music_playlists(max_res=limit):
+                    bid = getattr(p, "_raw_data", {}).get("browseId", "")
+                    playlists.append((p._raw_data, bid))
+
             return tracks, albums, artists, playlists
 
         tracks, albums, artists, playlists = await asyncio.to_thread(_do)
+
         result.tracks = [_to_track(t, self.domain, self.instance_id) for t in tracks]
         result.albums = [_to_album(d, bid, self.domain, self.instance_id) for d, bid in albums]
         result.artists = [_to_artist(d, bid, self.domain, self.instance_id) for d, bid in artists]
         result.playlists = [_to_playlist(d, bid, self.domain, self.instance_id) for d, bid in playlists]
+
         for t in result.tracks:
             self._track_cache[t.item_id] = t
-        # Cache browse_id → playlist_id so get_album() can use the stable playlist path
         for d, bid in albums:
             pl_id = d.get("playlistId", "")
             if bid and pl_id:
@@ -244,11 +264,12 @@ class YouTubeMusicProvider(MusicProvider):
         parts = [p for p in path.split("://")[1].split("/") if p] if "://" in path else []
         if not parts:
             return [
-                BrowseFolder(item_id="trending", provider=self.domain, path=f"{path}/trending", name="Trending"),
+                BrowseFolder(item_id="trending", provider=self.domain,
+                             path=f"{path}/trending", name="Trending"),
             ]
 
         def _do():
-            s = self._search_cls("trending music")
+            s = self._YoutubeSearch("trending music")
             return list(s.iterate_music_tracks(max_res=20))
 
         tracks = await asyncio.to_thread(_do)
@@ -259,8 +280,7 @@ class YouTubeMusicProvider(MusicProvider):
         playlist_id = self._album_playlist_map.get(browse_id, "")
 
         def _do():
-            from tutubo.ytmus import get_album  # noqa: PLC0415
-            return get_album(browse_id, playlist_id)
+            return self._get_album(browse_id, playlist_id)
 
         data = await asyncio.to_thread(_do)
         return _to_album(data, browse_id, self.domain, self.instance_id)
@@ -270,9 +290,8 @@ class YouTubeMusicProvider(MusicProvider):
         playlist_id = self._album_playlist_map.get(browse_id, "")
 
         def _do():
-            from tutubo.ytmus import get_album, MusicAlbum  # noqa: PLC0415
-            data = get_album(browse_id, playlist_id)
-            return MusicAlbum(data).tracks
+            data = self._get_album(browse_id, playlist_id)
+            return self._MusicAlbum(data).tracks
 
         tracks = await asyncio.to_thread(_do)
         result = [_to_track(t, self.domain, self.instance_id) for t in tracks]
@@ -296,11 +315,10 @@ class YouTubeMusicProvider(MusicProvider):
         browse_id = prov_artist_id.split("ytm:artist:")[-1]
 
         def _do():
-            from tutubo.ytmus import MusicArtist  # noqa: PLC0415
             ytm = self._get_ytmus()
             data = ytm.get_artist(browse_id)
             data["browseId"] = browse_id
-            return MusicArtist(data).tracks
+            return self._MusicArtist(data).tracks
 
         tracks = await asyncio.to_thread(_do)
         result = [_to_track(t, self.domain, self.instance_id) for t in tracks]
@@ -317,13 +335,11 @@ class YouTubeMusicProvider(MusicProvider):
             result = []
             for alb in (artist_data.get("albums", {}).get("results") or []):
                 alb_id = alb.get("browseId", "")
-                if not alb_id:
-                    continue
-                result.append((alb, alb_id))
+                if alb_id:
+                    result.append((alb, alb_id))
             return result
 
         albums = await asyncio.to_thread(_do)
-        # Populate playlist map so get_album() can use the stable playlist path
         for d, bid in albums:
             pl_id = d.get("playlistId", "")
             if bid and pl_id:
@@ -346,11 +362,10 @@ class YouTubeMusicProvider(MusicProvider):
         browse_id = prov_playlist_id.split("ytm:playlist:")[-1]
 
         def _do():
-            from tutubo.ytmus import MusicPlaylist  # noqa: PLC0415
             ytm = self._get_ytmus()
             data = ytm.get_playlist(browse_id)
             data["browseId"] = browse_id
-            return MusicPlaylist(data).tracks
+            return self._MusicPlaylist(data).tracks
 
         tracks = await asyncio.to_thread(_do)
         result = [_to_track(t, self.domain, self.instance_id) for t in tracks]
@@ -359,10 +374,9 @@ class YouTubeMusicProvider(MusicProvider):
         return result
 
     async def get_track(self, prov_track_id: str) -> Track:
-        # Return cached track (populated during search/browse) to preserve full metadata
         if prov_track_id in self._track_cache:
             return self._track_cache[prov_track_id]
-        # Fallback: fetch metadata via yt-dlp when not in cache
+
         def _meta():
             import yt_dlp  # noqa: PLC0415
             opts = {"quiet": True, "no_warnings": True, "skip_download": True}
