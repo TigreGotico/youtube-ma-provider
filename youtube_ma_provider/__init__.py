@@ -336,7 +336,10 @@ class YouTubeMusicProvider(MusicProvider):
 
             if MediaType.RADIO in media_types:
                 CT = self._TutuboContentType
+                # Both live radio and live news channels are surfaced as MA Radio items.
                 for v in s.iterate_by_content_type(CT.LIVE_RADIO, max_res=limit):
+                    radios.append(v)
+                for v in s.iterate_by_content_type(CT.LIVE_NEWS, max_res=limit):
                     radios.append(v)
 
             if MediaType.PODCAST in media_types:
