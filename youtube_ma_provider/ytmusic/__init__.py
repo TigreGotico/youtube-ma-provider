@@ -258,7 +258,9 @@ class YouTubeMusicProvider(MusicProvider):
         for t in result.tracks:
             self._track_cache[t.item_id] = t
         for d, bid in albums:
-            pl_id = d.get("playlistId", "")
+            # ytmusicapi returns audioPlaylistId from get_album(); playlistId is
+            # the fallback key present in raw search results before enrichment.
+            pl_id = d.get("audioPlaylistId") or d.get("playlistId", "")
             if bid and pl_id:
                 self._album_playlist_map[bid] = pl_id
         return result
@@ -333,7 +335,7 @@ class YouTubeMusicProvider(MusicProvider):
 
         albums = await asyncio.to_thread(_do)
         for d, bid in albums:
-            pl_id = d.get("playlistId", "")
+            pl_id = d.get("audioPlaylistId") or d.get("playlistId", "")
             if bid and pl_id:
                 self._album_playlist_map[bid] = pl_id
         return [_to_album(d, bid, self.domain, self.instance_id) for d, bid in albums]

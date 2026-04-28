@@ -194,8 +194,9 @@ class YouTubeProvider(MusicProvider):
                     audiobooks.append(v)
 
             if MediaType.RADIO in media_types:
-                # Live radio and live news both surface as MA Radio.
-                s = self._YoutubeSearch.for_live_news(search_query)
+                # Use a plain search so the query isn't biased toward either
+                # live_radio or live_news; both content types surface as MA Radio.
+                s = self._YoutubeSearch(search_query)
                 for v in s.iterate_live_radio(max_res=limit):
                     radios.append(v)
                 for v in s.iterate_live_news(max_res=limit):
