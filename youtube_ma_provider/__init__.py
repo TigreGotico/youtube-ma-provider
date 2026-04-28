@@ -10,7 +10,6 @@ Supports:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from music_assistant_models.enums import (
@@ -26,10 +25,8 @@ from music_assistant_models.media_items import (
     Artist,
     Audiobook,
     AudioFormat,
-    BrowseFolder,
     ItemMapping,
     MediaItemImage,
-    MediaItemType,
     Playlist,
     Podcast,
     PodcastEpisode,
@@ -222,19 +219,38 @@ def _to_radio(v, domain: str, instance_id: str) -> Radio:
     return radio
 
 
-def _to_podcast(v, domain: str, instance_id: str) -> Podcast:
-    """Convert a tutubo VideoPreview classified as PODCAST to a MA Podcast."""
+def _to_podcast_episode(v, domain: str, instance_id: str) -> PodcastEpisode:
+    """Convert a tutubo VideoPreview classified as PODCAST to a MA PodcastEpisode.
+
+    A YouTube "podcast" video is an individual episode, not a show.  MA requires
+    PodcastEpisode to reference a parent Podcast; we create a minimal stub show
+    whose item_id is the channel name (or "YouTube Podcasts" as fallback) so
+    that episodes from the same channel group naturally.
+    """
     watch_url = _video_watch_url(v)
-    podcast = Podcast(
+    title = getattr(v, "title", None) or "Unknown"
+    # Use the video's channel as the logical show grouping.
+    show_name = getattr(v, "channel_name", None) or "YouTube Podcasts"
+    show_id = f"yt:podcast:{show_name}"
+    stub_show = Podcast(
+        item_id=show_id,
+        provider=domain,
+        name=show_name,
+        provider_mappings={_provider_mapping(show_id, domain, instance_id)},
+    )
+    episode = PodcastEpisode(
         item_id=watch_url,
         provider=domain,
-        name=getattr(v, "title", None) or "Unknown",
+        name=title,
+        position=0,  # YouTube search gives no episode number
+        podcast=stub_show,
+        duration=int(getattr(v, "length", None) or 0),
         provider_mappings={_provider_mapping(watch_url, domain, instance_id)},
     )
     img = _image(getattr(v, "thumbnail_url", None), instance_id)
     if img:
-        podcast.metadata.images = UniqueList([img])
-    return podcast
+        episode.metadata.images = UniqueList([img])
+    return episode
 
 
 # ---------------------------------------------------------------------------
@@ -246,9 +262,12 @@ def _extract_stream_url(watch_url: str) -> str:
         import yt_dlp  # noqa: PLC0415
     except ImportError as err:
         raise ProviderUnavailableError("yt-dlp not installed") from err
-    with yt_dlp.YoutubeDL(_YTDLP_OPTS) as ydl:
-        info = ydl.extract_info(watch_url, download=False)
-        return info.get("url", "")
+    try:
+        with yt_dlp.YoutubeDL(_YTDLP_OPTS) as ydl:
+            info = ydl.extract_info(watch_url, download=False) or {}
+            return info.get("url", "")
+    except Exception as exc:
+        raise MediaNotFoundError(f"yt-dlp could not extract stream for {watch_url}: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -266,13 +285,11 @@ class YouTubeMusicProvider(MusicProvider):
         try:
             from tutubo import YoutubeSearch  # noqa: PLC0415
             from tutubo.ytmus import (  # noqa: PLC0415
-                MusicTrack, MusicVideo, MusicAlbum, MusicArtist, MusicPlaylist,
+                MusicAlbum, MusicArtist, MusicPlaylist,
                 get_album, _get_ytmus,
             )
             from tutubo.content_type import ContentType as TutuboContentType  # noqa: PLC0415
             self._YoutubeSearch = YoutubeSearch
-            self._MusicTrack = MusicTrack
-            self._MusicVideo = MusicVideo
             self._MusicAlbum = MusicAlbum
             self._MusicArtist = MusicArtist
             self._MusicPlaylist = MusicPlaylist
@@ -336,7 +353,7 @@ class YouTubeMusicProvider(MusicProvider):
         result.playlists = [_to_playlist(d, bid, self.domain, self.instance_id) for d, bid in playlists]
         result.audiobooks = [_to_audiobook(v, self.domain, self.instance_id) for v in audiobooks]
         result.radio = [_to_radio(v, self.domain, self.instance_id) for v in radios]
-        result.podcasts = [_to_podcast(v, self.domain, self.instance_id) for v in podcasts]
+        result.podcasts = [_to_podcast_episode(v, self.domain, self.instance_id) for v in podcasts]
 
         for t in result.tracks:
             self._track_cache[t.item_id] = t
@@ -345,46 +362,6 @@ class YouTubeMusicProvider(MusicProvider):
             if bid and pl_id:
                 self._album_playlist_map[bid] = pl_id
         return result
-
-    async def browse(self, path: str) -> Sequence[MediaItemType | BrowseFolder]:
-        parts = [p for p in path.split("://")[1].split("/") if p] if "://" in path else []
-        if not parts:
-            return [
-                BrowseFolder(item_id="trending", provider=self.domain,
-                             path=f"{path}/trending", name="Trending Music"),
-                BrowseFolder(item_id="audiobooks", provider=self.domain,
-                             path=f"{path}/audiobooks", name="Audiobooks"),
-                BrowseFolder(item_id="radio", provider=self.domain,
-                             path=f"{path}/radio", name="Live Radio"),
-                BrowseFolder(item_id="podcasts", provider=self.domain,
-                             path=f"{path}/podcasts", name="Podcasts"),
-            ]
-
-        section = parts[0]
-
-        def _do():
-            CT = self._TutuboContentType
-            if section == "audiobooks":
-                s = self._YoutubeSearch("free audiobook")
-                return "audiobooks", list(s.iterate_audiobooks(max_res=20))
-            if section == "radio":
-                s = self._YoutubeSearch("24/7 live radio")
-                return "radio", list(s.iterate_by_content_type(CT.LIVE_RADIO, max_res=20))
-            if section == "podcasts":
-                s = self._YoutubeSearch("podcast episode")
-                return "podcasts", list(s.iterate_podcasts(max_res=20))
-            # default: trending music
-            s = self._YoutubeSearch("trending music")
-            return "tracks", list(s.iterate_music_tracks(max_res=20))
-
-        kind, items = await asyncio.to_thread(_do)
-        if kind == "audiobooks":
-            return [_to_audiobook(v, self.domain, self.instance_id) for v in items]
-        if kind == "radio":
-            return [_to_radio(v, self.domain, self.instance_id) for v in items]
-        if kind == "podcasts":
-            return [_to_podcast(v, self.domain, self.instance_id) for v in items]
-        return [_to_track(t, self.domain, self.instance_id) for t in items]
 
     # ------------------------------------------------------------------
     # Music — album / artist / playlist
@@ -515,6 +492,8 @@ class YouTubeMusicProvider(MusicProvider):
         stream_url = await asyncio.to_thread(_extract_stream_url, item_id)
         if not stream_url:
             raise MediaNotFoundError(f"Could not resolve stream for: {item_id}")
+        # Live radio streams are not seekable; all other types are.
+        seekable = media_type != MediaType.RADIO
         return StreamDetails(
             provider=self.domain,
             item_id=item_id,
@@ -522,6 +501,6 @@ class YouTubeMusicProvider(MusicProvider):
             media_type=media_type,
             stream_type=StreamType.HTTP,
             path=stream_url,
-            can_seek=True,
-            allow_seek=True,
+            can_seek=seekable,
+            allow_seek=seekable,
         )
