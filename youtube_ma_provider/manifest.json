@@ -1,0 +1,11 @@
+{
+  "type": "music",
+  "domain": "tutubo",
+  "name": "YouTube Music (no login)",
+  "description": "Search and stream tracks, albums and artists from YouTube Music via tutubo (no account required).",
+  "codeowners": ["@TigreGotico"],
+  "stage": "beta",
+  "requirements": ["tutubo"],
+  "documentation": "https://github.com/TigreGotico/plugin-manager",
+  "multi_instance": false
+}
