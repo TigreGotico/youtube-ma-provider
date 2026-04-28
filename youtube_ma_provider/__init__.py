@@ -183,14 +183,9 @@ def _to_playlist(raw: dict, browse_id: str, domain: str, instance_id: str) -> Pl
 # Non-music conversions (VideoPreview — content-type filtered)
 # ---------------------------------------------------------------------------
 
-def _video_watch_url(v) -> str:
-    vid = getattr(v, "video_id", None) or getattr(v, "videoId", None) or ""
-    return f"https://www.youtube.com/watch?v={vid}" if vid else ""
-
-
 def _to_audiobook(v, domain: str, instance_id: str) -> Audiobook:
     """Convert a tutubo VideoPreview classified as AUDIOBOOK to a MA Audiobook."""
-    watch_url = _video_watch_url(v)
+    watch_url = v.watch_url
     book = Audiobook(
         item_id=watch_url,
         provider=domain,
@@ -205,8 +200,8 @@ def _to_audiobook(v, domain: str, instance_id: str) -> Audiobook:
 
 
 def _to_radio(v, domain: str, instance_id: str) -> Radio:
-    """Convert a tutubo VideoPreview classified as LIVE_RADIO to a MA Radio."""
-    watch_url = _video_watch_url(v)
+    """Convert a tutubo VideoPreview classified as LIVE_RADIO/LIVE_NEWS to a MA Radio."""
+    watch_url = v.watch_url
     radio = Radio(
         item_id=watch_url,
         provider=domain,
@@ -227,10 +222,10 @@ def _to_podcast_episode(v, domain: str, instance_id: str) -> PodcastEpisode:
     whose item_id is the channel name (or "YouTube Podcasts" as fallback) so
     that episodes from the same channel group naturally.
     """
-    watch_url = _video_watch_url(v)
-    title = getattr(v, "title", None) or "Unknown"
-    # Use the video's channel as the logical show grouping.
-    show_name = getattr(v, "channel_name", None) or "YouTube Podcasts"
+    watch_url = v.watch_url
+    title = v.title or "Unknown"
+    # Use the video's channel (VideoPreview.author) as the logical show grouping.
+    show_name = v.author or "YouTube Podcasts"
     show_id = f"yt:podcast:{show_name}"
     stub_show = Podcast(
         item_id=show_id,
@@ -288,14 +283,12 @@ class YouTubeMusicProvider(MusicProvider):
                 MusicAlbum, MusicArtist, MusicPlaylist,
                 get_album, _get_ytmus,
             )
-            from tutubo.content_type import ContentType as TutuboContentType  # noqa: PLC0415
             self._YoutubeSearch = YoutubeSearch
             self._MusicAlbum = MusicAlbum
             self._MusicArtist = MusicArtist
             self._MusicPlaylist = MusicPlaylist
             self._get_album = get_album
             self._get_ytmus = _get_ytmus
-            self._TutuboContentType = TutuboContentType
         except ImportError as err:
             raise ProviderUnavailableError("tutubo not installed") from err
         self._track_cache: dict[str, Track] = {}
@@ -335,11 +328,10 @@ class YouTubeMusicProvider(MusicProvider):
                     audiobooks.append(v)
 
             if MediaType.RADIO in media_types:
-                CT = self._TutuboContentType
-                # Both live radio and live news channels are surfaced as MA Radio items.
-                for v in s.iterate_by_content_type(CT.LIVE_RADIO, max_res=limit):
+                # Both live radio streams and live news channels surface as MA Radio.
+                for v in s.iterate_live_radio(max_res=limit):
                     radios.append(v)
-                for v in s.iterate_by_content_type(CT.LIVE_NEWS, max_res=limit):
+                for v in s.iterate_live_news(max_res=limit):
                     radios.append(v)
 
             if MediaType.PODCAST in media_types:
