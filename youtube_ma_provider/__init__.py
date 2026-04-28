@@ -1,4 +1,11 @@
-"""YouTube Music provider for Music Assistant via tutubo + yt-dlp."""
+"""YouTube Music provider for Music Assistant via tutubo + yt-dlp.
+
+Supports:
+- Music tracks, albums, artists, playlists (via YouTube Music API)
+- Audiobooks (YouTube videos classified as audiobooks)
+- Podcasts (YouTube videos classified as podcasts)
+- Radio stations (YouTube live streams classified as live radio)
+"""
 
 from __future__ import annotations
 
@@ -17,13 +24,17 @@ from music_assistant_models.errors import MediaNotFoundError, ProviderUnavailabl
 from music_assistant_models.media_items import (
     Album,
     Artist,
+    Audiobook,
     AudioFormat,
     BrowseFolder,
     ItemMapping,
     MediaItemImage,
     MediaItemType,
     Playlist,
+    Podcast,
+    PodcastEpisode,
     ProviderMapping,
+    Radio,
     SearchResults,
     Track,
     UniqueList,
@@ -68,7 +79,7 @@ async def get_config_entries(
 
 
 # ---------------------------------------------------------------------------
-# Model conversion helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _image(url: str | None, instance_id: str) -> MediaItemImage | None:
@@ -81,6 +92,21 @@ def _artist_mapping(name: str, domain: str) -> ItemMapping:
     return ItemMapping(media_type=MediaType.ARTIST, item_id=name, provider=domain, name=name)
 
 
+def _provider_mapping(item_id: str, domain: str, instance_id: str) -> ProviderMapping:
+    return ProviderMapping(item_id=item_id, provider_domain=domain, provider_instance=instance_id)
+
+
+def _thumb_url(raw: dict) -> str | None:
+    thumbs = raw.get("thumbnails") or raw.get("thumbnail") or []
+    if isinstance(thumbs, list) and thumbs:
+        return thumbs[-1].get("url")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Music conversions (YouTube Music API — MusicTrack etc.)
+# ---------------------------------------------------------------------------
+
 def _to_track(t, domain: str, instance_id: str) -> Track:
     """Convert a tutubo MusicTrack/MusicVideo to a MA Track."""
     watch_url = t.watch_url
@@ -88,13 +114,10 @@ def _to_track(t, domain: str, instance_id: str) -> Track:
         item_id=watch_url,
         provider=domain,
         name=t.title or "Unknown",
-        provider_mappings={
-            ProviderMapping(item_id=watch_url, provider_domain=domain, provider_instance=instance_id)
-        },
+        provider_mappings={_provider_mapping(watch_url, domain, instance_id)},
         duration=int(t.length or 0),
     )
     artist_name = t.artist or "Unknown"
-    # Prefer the stable browseId as the artist item_id when available.
     raw_artists = getattr(t, "_raw_data", {}).get("artists") or []
     artist_browse_id = raw_artists[0].get("id") if raw_artists else None
     artist_id = f"ytm:artist:{artist_browse_id}" if artist_browse_id else artist_name
@@ -107,13 +130,6 @@ def _to_track(t, domain: str, instance_id: str) -> Track:
     return track
 
 
-def _thumb_url(raw: dict) -> str | None:
-    thumbs = raw.get("thumbnails") or raw.get("thumbnail") or []
-    if isinstance(thumbs, list) and thumbs:
-        return thumbs[-1].get("url")
-    return None
-
-
 def _to_album(raw: dict, browse_id: str, domain: str, instance_id: str) -> Album:
     item_id = f"ytm:album:{browse_id}"
     title = raw.get("title") or raw.get("name") or "Unknown"
@@ -123,9 +139,7 @@ def _to_album(raw: dict, browse_id: str, domain: str, instance_id: str) -> Album
         item_id=item_id,
         provider=domain,
         name=title,
-        provider_mappings={
-            ProviderMapping(item_id=item_id, provider_domain=domain, provider_instance=instance_id)
-        },
+        provider_mappings={_provider_mapping(item_id, domain, instance_id)},
     )
     album.artists = UniqueList([_artist_mapping(artist_name, domain)])
     img = _image(_thumb_url(raw), instance_id)
@@ -141,9 +155,7 @@ def _to_artist(raw: dict, browse_id: str, domain: str, instance_id: str) -> Arti
         item_id=item_id,
         provider=domain,
         name=name,
-        provider_mappings={
-            ProviderMapping(item_id=item_id, provider_domain=domain, provider_instance=instance_id)
-        },
+        provider_mappings={_provider_mapping(item_id, domain, instance_id)},
     )
     img = _image(_thumb_url(raw), instance_id)
     if img:
@@ -162,15 +174,72 @@ def _to_playlist(raw: dict, browse_id: str, domain: str, instance_id: str) -> Pl
         name=title,
         owner=owner,
         is_editable=False,
-        provider_mappings={
-            ProviderMapping(item_id=item_id, provider_domain=domain, provider_instance=instance_id)
-        },
+        provider_mappings={_provider_mapping(item_id, domain, instance_id)},
     )
     img = _image(_thumb_url(raw), instance_id)
     if img:
         pl.metadata.images = UniqueList([img])
     return pl
 
+
+# ---------------------------------------------------------------------------
+# Non-music conversions (VideoPreview — content-type filtered)
+# ---------------------------------------------------------------------------
+
+def _video_watch_url(v) -> str:
+    vid = getattr(v, "video_id", None) or getattr(v, "videoId", None) or ""
+    return f"https://www.youtube.com/watch?v={vid}" if vid else ""
+
+
+def _to_audiobook(v, domain: str, instance_id: str) -> Audiobook:
+    """Convert a tutubo VideoPreview classified as AUDIOBOOK to a MA Audiobook."""
+    watch_url = _video_watch_url(v)
+    book = Audiobook(
+        item_id=watch_url,
+        provider=domain,
+        name=getattr(v, "title", None) or "Unknown",
+        provider_mappings={_provider_mapping(watch_url, domain, instance_id)},
+        duration=int(getattr(v, "length", None) or 0),
+    )
+    img = _image(getattr(v, "thumbnail_url", None), instance_id)
+    if img:
+        book.metadata.images = UniqueList([img])
+    return book
+
+
+def _to_radio(v, domain: str, instance_id: str) -> Radio:
+    """Convert a tutubo VideoPreview classified as LIVE_RADIO to a MA Radio."""
+    watch_url = _video_watch_url(v)
+    radio = Radio(
+        item_id=watch_url,
+        provider=domain,
+        name=getattr(v, "title", None) or "Unknown",
+        provider_mappings={_provider_mapping(watch_url, domain, instance_id)},
+    )
+    img = _image(getattr(v, "thumbnail_url", None), instance_id)
+    if img:
+        radio.metadata.images = UniqueList([img])
+    return radio
+
+
+def _to_podcast(v, domain: str, instance_id: str) -> Podcast:
+    """Convert a tutubo VideoPreview classified as PODCAST to a MA Podcast."""
+    watch_url = _video_watch_url(v)
+    podcast = Podcast(
+        item_id=watch_url,
+        provider=domain,
+        name=getattr(v, "title", None) or "Unknown",
+        provider_mappings={_provider_mapping(watch_url, domain, instance_id)},
+    )
+    img = _image(getattr(v, "thumbnail_url", None), instance_id)
+    if img:
+        podcast.metadata.images = UniqueList([img])
+    return podcast
+
+
+# ---------------------------------------------------------------------------
+# Stream resolution
+# ---------------------------------------------------------------------------
 
 def _extract_stream_url(watch_url: str) -> str:
     try:
@@ -187,7 +256,7 @@ def _extract_stream_url(watch_url: str) -> str:
 # ---------------------------------------------------------------------------
 
 class YouTubeMusicProvider(MusicProvider):
-    """Music Assistant provider for YouTube Music via tutubo."""
+    """Music Assistant provider for YouTube Music, audiobooks, podcasts, and radio via tutubo."""
 
     @property
     def is_streaming_provider(self) -> bool:
@@ -200,6 +269,7 @@ class YouTubeMusicProvider(MusicProvider):
                 MusicTrack, MusicVideo, MusicAlbum, MusicArtist, MusicPlaylist,
                 get_album, _get_ytmus,
             )
+            from tutubo.content_type import ContentType as TutuboContentType  # noqa: PLC0415
             self._YoutubeSearch = YoutubeSearch
             self._MusicTrack = MusicTrack
             self._MusicVideo = MusicVideo
@@ -208,11 +278,10 @@ class YouTubeMusicProvider(MusicProvider):
             self._MusicPlaylist = MusicPlaylist
             self._get_album = get_album
             self._get_ytmus = _get_ytmus
+            self._TutuboContentType = TutuboContentType
         except ImportError as err:
             raise ProviderUnavailableError("tutubo not installed") from err
-        # Keyed by watch URL — populated during search so get_track() has full metadata.
         self._track_cache: dict[str, Track] = {}
-        # browse_id → playlistId — used to prefer the stable playlist path for albums.
         self._album_playlist_map: dict[str, str] = {}
 
     async def search(
@@ -223,6 +292,7 @@ class YouTubeMusicProvider(MusicProvider):
         def _do():
             s = self._YoutubeSearch(search_query)
             tracks, albums, artists, playlists = [], [], [], []
+            audiobooks, radios, podcasts = [], [], []
 
             if MediaType.TRACK in media_types:
                 for t in s.iterate_music_tracks(max_res=limit):
@@ -230,27 +300,43 @@ class YouTubeMusicProvider(MusicProvider):
 
             if MediaType.ALBUM in media_types:
                 for a in s.iterate_music_albums(max_res=limit):
-                    bid = getattr(a, "_raw_data", {}).get("browseId", "")
+                    bid = a._raw_data.get("browseId", "")
                     albums.append((a._raw_data, bid))
 
             if MediaType.ARTIST in media_types:
                 for a in s.iterate_music_artists(max_res=limit):
-                    bid = getattr(a, "_raw_data", {}).get("browseId", "")
+                    bid = a._raw_data.get("browseId", "")
                     artists.append((a._raw_data, bid))
 
             if MediaType.PLAYLIST in media_types:
                 for p in s.iterate_music_playlists(max_res=limit):
-                    bid = getattr(p, "_raw_data", {}).get("browseId", "")
+                    bid = p._raw_data.get("browseId", "")
                     playlists.append((p._raw_data, bid))
 
-            return tracks, albums, artists, playlists
+            if MediaType.AUDIOBOOK in media_types:
+                for v in s.iterate_audiobooks(max_res=limit):
+                    audiobooks.append(v)
 
-        tracks, albums, artists, playlists = await asyncio.to_thread(_do)
+            if MediaType.RADIO in media_types:
+                CT = self._TutuboContentType
+                for v in s.iterate_by_content_type(CT.LIVE_RADIO, max_res=limit):
+                    radios.append(v)
+
+            if MediaType.PODCAST in media_types:
+                for v in s.iterate_podcasts(max_res=limit):
+                    podcasts.append(v)
+
+            return tracks, albums, artists, playlists, audiobooks, radios, podcasts
+
+        tracks, albums, artists, playlists, audiobooks, radios, podcasts = await asyncio.to_thread(_do)
 
         result.tracks = [_to_track(t, self.domain, self.instance_id) for t in tracks]
         result.albums = [_to_album(d, bid, self.domain, self.instance_id) for d, bid in albums]
         result.artists = [_to_artist(d, bid, self.domain, self.instance_id) for d, bid in artists]
         result.playlists = [_to_playlist(d, bid, self.domain, self.instance_id) for d, bid in playlists]
+        result.audiobooks = [_to_audiobook(v, self.domain, self.instance_id) for v in audiobooks]
+        result.radio = [_to_radio(v, self.domain, self.instance_id) for v in radios]
+        result.podcasts = [_to_podcast(v, self.domain, self.instance_id) for v in podcasts]
 
         for t in result.tracks:
             self._track_cache[t.item_id] = t
@@ -265,24 +351,49 @@ class YouTubeMusicProvider(MusicProvider):
         if not parts:
             return [
                 BrowseFolder(item_id="trending", provider=self.domain,
-                             path=f"{path}/trending", name="Trending"),
+                             path=f"{path}/trending", name="Trending Music"),
+                BrowseFolder(item_id="audiobooks", provider=self.domain,
+                             path=f"{path}/audiobooks", name="Audiobooks"),
+                BrowseFolder(item_id="radio", provider=self.domain,
+                             path=f"{path}/radio", name="Live Radio"),
+                BrowseFolder(item_id="podcasts", provider=self.domain,
+                             path=f"{path}/podcasts", name="Podcasts"),
             ]
 
-        def _do():
-            s = self._YoutubeSearch("trending music")
-            return list(s.iterate_music_tracks(max_res=20))
+        section = parts[0]
 
-        tracks = await asyncio.to_thread(_do)
-        return [_to_track(t, self.domain, self.instance_id) for t in tracks]
+        def _do():
+            CT = self._TutuboContentType
+            if section == "audiobooks":
+                s = self._YoutubeSearch("free audiobook")
+                return "audiobooks", list(s.iterate_audiobooks(max_res=20))
+            if section == "radio":
+                s = self._YoutubeSearch("24/7 live radio")
+                return "radio", list(s.iterate_by_content_type(CT.LIVE_RADIO, max_res=20))
+            if section == "podcasts":
+                s = self._YoutubeSearch("podcast episode")
+                return "podcasts", list(s.iterate_podcasts(max_res=20))
+            # default: trending music
+            s = self._YoutubeSearch("trending music")
+            return "tracks", list(s.iterate_music_tracks(max_res=20))
+
+        kind, items = await asyncio.to_thread(_do)
+        if kind == "audiobooks":
+            return [_to_audiobook(v, self.domain, self.instance_id) for v in items]
+        if kind == "radio":
+            return [_to_radio(v, self.domain, self.instance_id) for v in items]
+        if kind == "podcasts":
+            return [_to_podcast(v, self.domain, self.instance_id) for v in items]
+        return [_to_track(t, self.domain, self.instance_id) for t in items]
+
+    # ------------------------------------------------------------------
+    # Music — album / artist / playlist
+    # ------------------------------------------------------------------
 
     async def get_album(self, prov_album_id: str) -> Album:
         browse_id = prov_album_id.split("ytm:album:")[-1]
         playlist_id = self._album_playlist_map.get(browse_id, "")
-
-        def _do():
-            return self._get_album(browse_id, playlist_id)
-
-        data = await asyncio.to_thread(_do)
+        data = await asyncio.to_thread(self._get_album, browse_id, playlist_id)
         return _to_album(data, browse_id, self.domain, self.instance_id)
 
     async def get_album_tracks(self, prov_album_id: str) -> list[Track]:
@@ -373,6 +484,10 @@ class YouTubeMusicProvider(MusicProvider):
             self._track_cache[t.item_id] = t
         return result
 
+    # ------------------------------------------------------------------
+    # Generic track / stream
+    # ------------------------------------------------------------------
+
     async def get_track(self, prov_track_id: str) -> Track:
         if prov_track_id in self._track_cache:
             return self._track_cache[prov_track_id]
@@ -389,13 +504,7 @@ class YouTubeMusicProvider(MusicProvider):
             item_id=prov_track_id,
             provider=self.domain,
             name=title,
-            provider_mappings={
-                ProviderMapping(
-                    item_id=prov_track_id,
-                    provider_domain=self.domain,
-                    provider_instance=self.instance_id,
-                )
-            },
+            provider_mappings={_provider_mapping(prov_track_id, self.domain, self.instance_id)},
         )
         if thumb:
             track.metadata.images = UniqueList([_image(thumb, self.instance_id)])
@@ -410,7 +519,7 @@ class YouTubeMusicProvider(MusicProvider):
             provider=self.domain,
             item_id=item_id,
             audio_format=AudioFormat(content_type=ContentType.UNKNOWN),
-            media_type=MediaType.TRACK,
+            media_type=media_type,
             stream_type=StreamType.HTTP,
             path=stream_url,
             can_seek=True,
