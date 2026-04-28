@@ -4,16 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-ma-provider"
-version = "0.1.0"
-description = "YouTube Music provider for Music Assistant via tutubo and yt-dlp"
+version = "0.2.0"
+description = "YouTube and YouTube Music providers for Music Assistant via tutubo and yt-dlp"
 requires-python = ">=3.11"
 dependencies = ["music-assistant-plugin-manager", "tutubo", "yt-dlp"]
 
 [project.entry-points."music_assistant.provider"]
-tutubo = "youtube_ma_provider"
+tutubo_music   = "youtube_ma_provider.ytmusic"
+tutubo_youtube = "youtube_ma_provider.youtube"
 
 [tool.setuptools.packages.find]
 include = ["youtube_ma_provider*"]
 
 [tool.setuptools.package-data]
-youtube_ma_provider = ["manifest.json"]
+"youtube_ma_provider.ytmusic" = ["manifest.json"]
+"youtube_ma_provider.youtube" = ["manifest.json"]

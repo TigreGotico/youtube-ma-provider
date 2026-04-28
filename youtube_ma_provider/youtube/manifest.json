@@ -1,0 +1,11 @@
+{
+  "type": "music",
+  "domain": "tutubo_youtube",
+  "name": "YouTube (no login)",
+  "description": "Search and stream audiobooks, podcasts, and live radio from YouTube via tutubo content-type filtering (no account required).",
+  "codeowners": ["@TigreGotico"],
+  "stage": "beta",
+  "requirements": ["tutubo", "yt-dlp"],
+  "documentation": "https://github.com/TigreGotico/youtube-ma-provider",
+  "multi_instance": false
+}

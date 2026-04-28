@@ -1,8 +1,8 @@
 {
   "type": "music",
-  "domain": "tutubo",
-  "name": "YouTube (no login)",
-  "description": "Search and stream music, audiobooks, podcasts, and live radio from YouTube via tutubo (no account required).",
+  "domain": "tutubo_music",
+  "name": "YouTube Music (no login)",
+  "description": "Search and stream music tracks, albums, artists, and playlists from YouTube Music via tutubo (no account required).",
   "codeowners": ["@TigreGotico"],
   "stage": "beta",
   "requirements": ["tutubo", "yt-dlp"],
