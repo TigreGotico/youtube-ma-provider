@@ -2,7 +2,7 @@
   "type": "music",
   "domain": "tutubo_youtube",
   "name": "YouTube (no login)",
-  "description": "Search and stream audiobooks, podcasts, and live radio from YouTube via tutubo content-type filtering (no account required).",
+  "description": "Search and stream videos, channels, playlists, audiobooks, podcasts, and live radio from YouTube via tutubo (no account required).",
   "codeowners": ["@TigreGotico"],
   "stage": "beta",
   "requirements": ["tutubo", "yt-dlp"],
