@@ -1,13 +1,13 @@
 # youtube-ma-provider
 
-Two [Music Assistant](https://music-assistant.io) providers that bring YouTube and YouTube Music into MA without requiring a Google account or API key.
+Two [Music Assistant](https://music-assistant.io) providers that bring YouTube and YouTube Music into MA. Neither provider needs a Google account or an API key.
 
 | Provider domain | Source | What you get |
 |---|---|---|
 | `tutubo_music` | music.youtube.com (YouTube Music API) | Tracks, albums, artists, playlists with structured metadata |
 | `tutubo_youtube` | youtube.com (public page scraping) | Videos as tracks, channels as artists (follow!), playlists, audiobooks, podcasts, live radio |
 
-Both providers resolve stream URLs at play-time via `yt-dlp` — no credentials, no OAuth, no API quotas.
+Both providers resolve stream URLs at play time through `yt-dlp`. Neither needs credentials, OAuth, or an API quota.
 
 ---
 
@@ -33,13 +33,13 @@ Both providers resolve stream URLs at play-time via `yt-dlp` — no credentials,
 pip install youtube-ma-provider
 ```
 
-This pulls in three dependencies automatically:
+This installs three dependencies:
 
 | Package | Role |
 |---|---|
 | `music-assistant-plugin-manager` | Registers the providers with MA at startup without touching MA's source tree |
-| `tutubo` | Scrapes YouTube / YouTube Music search results and channel pages |
-| `yt-dlp` | Resolves watch URLs to actual audio stream URLs at play-time |
+| `tutubo` | Scrapes YouTube and YouTube Music search results and channel pages |
+| `yt-dlp` | Resolves watch URLs to audio stream URLs at play time |
 
 ### 2. Launch Music Assistant through the plugin manager
 
@@ -47,17 +47,17 @@ This pulls in three dependencies automatically:
 mass-pm
 ```
 
-`mass-pm` is a thin wrapper that registers all installed MA provider plugins (via setuptools entrypoints) before delegating to the normal `music-assistant` process. The two YouTube providers appear automatically in MA's **Settings → Providers** list.
+`mass-pm` is a thin wrapper. It registers all installed MA provider plugins, through setuptools entrypoints, then starts the normal `music-assistant` process. The two YouTube providers then appear in MA's **Settings → Providers** list.
 
-> If you run Music Assistant some other way (Docker, systemd, etc.) see [Architecture deep-dive](#architecture-deep-dive) for how to integrate.
+> If you run Music Assistant a different way (Docker, systemd, and so on), see [Architecture deep-dive](#architecture-deep-dive) for how to integrate.
 
 ### 3. Enable the providers
 
 In Music Assistant:
 
 1. Open **Settings → Providers**.
-2. You will see **YouTube Music (no login)** and **YouTube (no login)**.
-3. Click **+** on each one — no configuration fields are required.
+2. Find **YouTube Music (no login)** and **YouTube (no login)**.
+3. Click **+** on each one. No configuration fields are required.
 4. Both providers are now active.
 
 ---
@@ -86,13 +86,13 @@ User presses Play on any item
 
 **Why two providers?**
 
-YouTube Music (`music.youtube.com`) and YouTube (`youtube.com`) are separate surfaces with different search APIs and different data shapes. YouTube Music returns structured music metadata (ISRC-equivalent IDs, artist browse IDs, album browse IDs) that maps cleanly onto MA's music model. Generic YouTube returns video metadata — useful for channels, playlists, long-form content — but without music-level structure.
+YouTube Music (`music.youtube.com`) and YouTube (`youtube.com`) are separate surfaces. Each has its own search API and its own data shape. YouTube Music returns structured music metadata (ISRC-equivalent IDs, artist browse IDs, album browse IDs) that maps directly onto MA's music model. Generic YouTube returns video metadata, useful for channels, playlists, and long-form content, but without music-level structure.
 
-Keeping them separate means:
+Keeping the two providers separate gives you:
 
-- Searching for a song → `tutubo_music` gives you the canonical music result with correct artist/album links.
-- Searching for a channel or playlist → `tutubo_youtube` gives you the channel as a followable artist and the playlist as a browseable collection.
-- No double-results in music search from generic YouTube noise.
+- A song search through `tutubo_music` returns the canonical music result with correct artist and album links.
+- A channel or playlist search through `tutubo_youtube` returns the channel as a followable artist and the playlist as a browsable collection.
+- No duplicate results in music search from generic YouTube noise.
 
 ---
 
@@ -107,8 +107,8 @@ Keeping them separate means:
 | Feature | Description |
 |---|---|
 | `SEARCH` | Tracks, albums, artists, playlists |
-| `ARTIST_TOPTRACKS` | Fetch an artist's top songs via YTM API |
-| `ARTIST_ALBUMS` | Fetch an artist's discography via YTM API |
+| `ARTIST_TOPTRACKS` | Fetch an artist's top songs through the YTM API |
+| `ARTIST_ALBUMS` | Fetch an artist's discography through the YTM API |
 
 #### Media type mapping
 
@@ -132,12 +132,12 @@ Keeping them separate means:
 | `get_playlist(id)` | Fetches playlist metadata |
 | `get_playlist_tracks(id, page)` | Fetches playlist track listing |
 | `get_track(id)` | yt-dlp metadata fallback for unknown watch URLs |
-| `get_stream_details(id, media_type)` | Resolves watch URL to audio stream via yt-dlp |
+| `get_stream_details(id, media_type)` | Resolves watch URL to audio stream through yt-dlp |
 
 #### Internal caches
 
-- `_track_cache: dict[str, Track]` — avoids redundant yt-dlp calls for tracks seen in search results.
-- `_album_playlist_map: dict[browseId, playlistId]` — albums on YTM have both a browse ID and a playlist ID; storing the map lets `get_album()` use the faster `get_playlist()` path instead of `get_album()`.
+- `_track_cache: dict[str, Track]` — avoids repeat yt-dlp calls for tracks already seen in search results.
+- `_album_playlist_map: dict[browseId, playlistId]` — albums on YTM have both a browse ID and a playlist ID. Storing the map lets `get_album()` use the faster `get_playlist()` path instead of `get_album()`.
 
 ---
 
@@ -163,23 +163,23 @@ Keeping them separate means:
 | `Radio` | Live stream (LIVE\_RADIO or LIVE\_NEWS) | `https://www.youtube.com/watch?v=<id>` |
 | `PodcastEpisode` | Video classified as PODCAST | `https://www.youtube.com/watch?v=<id>` |
 
-> Audiobook/podcast/radio classification is done by `tutubo`'s content-type classifier, which analyses video titles, descriptions, and channel tags. It is heuristic — expect occasional misses.
+> `tutubo`'s content-type classifier assigns the audiobook, podcast, and radio types. It checks video titles, descriptions, and channel tags. The classifier is heuristic, so it will occasionally misclassify a video.
 
 #### Methods
 
 | Method | What it does |
 |---|---|
 | `search(query, media_types, limit)` | Searches YouTube for each requested media type |
-| `get_artist(channel_url)` | Fetches channel metadata via `Channel(url)` page scrape |
+| `get_artist(channel_url)` | Fetches channel metadata through a `Channel(url)` page scrape |
 | `get_artist_toptracks(channel_url)` | Returns `Channel.videos()` as Tracks |
-| `get_playlist(playlist_url)` | Fetches playlist metadata via `Playlist(url)` |
+| `get_playlist(playlist_url)` | Fetches playlist metadata through `Playlist(url)` |
 | `get_playlist_tracks(playlist_url, page)` | Returns `Playlist.videos()` as Tracks |
 | `get_track(watch_url)` | yt-dlp metadata fallback |
-| `get_stream_details(id, media_type)` | Resolves to audio stream; live streams have `can_seek=False` |
+| `get_stream_details(id, media_type)` | Resolves to an audio stream. Live streams get `can_seek=False`. |
 
 #### How search uses factory queries
 
-For content-type filtered results, `tutubo` provides factory classmethods that append keywords to the query before searching YouTube, improving classification accuracy:
+For content-type filtered results, `tutubo` provides factory classmethods. Each one appends keywords to the query before searching YouTube, which improves classification accuracy.
 
 | Media type | Factory used | Effect |
 |---|---|---|
@@ -187,22 +187,22 @@ For content-type filtered results, `tutubo` provides factory classmethods that a
 | `PODCAST` | `YoutubeSearch.for_podcasts(query)` | Appends `"podcast"` |
 | `TRACK`, `ARTIST`, `PLAYLIST`, `RADIO` | `YoutubeSearch(query)` (plain) | No modification |
 
-Radio uses a plain search so that `iterate_live_radio()` and `iterate_live_news()` both get unbiased results on the same query.
+Radio uses a plain search so that `iterate_live_radio()` and `iterate_live_news()` both get unbiased results for the same query.
 
 ---
 
 ## Following a YouTube channel
 
-This is the main feature of `tutubo_youtube` beyond music. Any YouTube channel can be followed as an MA Artist, and its uploads become a playable track list.
+This is the main feature of `tutubo_youtube` beyond music. You can follow any YouTube channel as an MA Artist. Its uploads then become a playable track list.
 
 ### Step by step
 
-1. In MA, open **Search** and type the channel name (e.g. `Stoned Meadow Of Doom`).
+1. In MA, open **Search** and type the channel name (for example, `Stoned Meadow Of Doom`).
 2. Switch the result filter to **Artists**.
 3. The channel appears as an artist card with its avatar.
 4. Click the heart / follow button.
 5. The channel is now in your MA library under **Artists**.
-6. Opening the artist page shows its latest uploads (via `get_artist_toptracks`) as a playable list.
+6. Open the artist page to see its latest uploads (through `get_artist_toptracks`) as a playable list.
 
 ### What `get_artist_toptracks` actually does
 
@@ -212,7 +212,7 @@ videos = list(ch.videos())   # scrapes the channel's /videos tab
 # each Video → Track with watch_url as item_id
 ```
 
-`Channel(url)` scrapes the channel page — it is not cached. Each visit to the artist page in MA makes a fresh HTTP request to YouTube. This is intentional (always fresh uploads) but means it is as slow as a page load. If you see MA taking a few seconds to open a channel's track list, this is why.
+`Channel(url)` scrapes the channel page. It is not cached, so each visit to the artist page in MA makes a fresh HTTP request to YouTube. This is intentional, so uploads stay current, but it means the page load is as slow as a normal page load. If MA takes a few seconds to open a channel's track list, this is why.
 
 ### Using a vanity URL directly
 
@@ -222,7 +222,7 @@ You can also navigate directly to a channel's artist page if you know its URL. I
 https://www.youtube.com/@StonedMeadowOfDoom
 ```
 
-MA will call `get_artist()` with that URL, which passes it straight to `Channel(url)` — tutubo handles both `/channel/<id>` and `/@handle` URL forms.
+MA calls `get_artist()` with that URL, which passes it straight to `Channel(url)`. tutubo handles both the `/channel/<id>` and the `/@handle` URL forms.
 
 ---
 
@@ -230,11 +230,11 @@ MA will call `get_artist()` with that URL, which passes it straight to `Channel(
 
 ### How providers are discovered
 
-Music Assistant has a hard-coded set of built-in providers. Adding an external one normally requires a pull request to the MA core repository. `music-assistant-plugin-manager` works around this by patching MA's provider discovery at process start.
+Music Assistant has a hard-coded set of built-in providers. Adding an external one normally needs a pull request to the MA core repository. `music-assistant-plugin-manager` works around this by patching MA's provider discovery at process start.
 
-The patch works by monkey-patching the private method `_MusicAssistant__load_provider_manifests` (Python name-mangling of `__load_provider_manifests`) to also scan the `music_assistant.provider` setuptools entrypoint group before MA does its own discovery.
+The patch monkey-patches the private method `_MusicAssistant__load_provider_manifests` (Python name-mangling of `__load_provider_manifests`). The patched method scans the `music_assistant.provider` setuptools entrypoint group before MA runs its own discovery.
 
-The entrypoints declared in `pyproject.toml`:
+The entrypoints are declared in `pyproject.toml`:
 
 ```toml
 [project.entry-points."music_assistant.provider"]
@@ -274,7 +274,7 @@ Each sub-provider has its own `manifest.json`:
 }
 ```
 
-The `domain` field is the stable identifier MA uses internally. It appears in all `ProviderMapping` objects and in `self.domain` inside the provider class.
+The `domain` field is the stable identifier MA uses internally. It appears in every `ProviderMapping` object and as `self.domain` inside the provider class.
 
 ### Stream resolution flow
 
@@ -291,16 +291,16 @@ MA calls get_stream_details(item_id="https://www.youtube.com/watch?v=XYZ", media
                                └─ MA fetches and plays the direct URL
 ```
 
-yt-dlp is invoked once per play. The resulting `googlevideo.com` URL is ephemeral (expires in minutes), so it is never cached.
+yt-dlp runs once per play. The resulting `googlevideo.com` URL expires within minutes, so it is never cached.
 
 ### Why item\_id is a URL
 
-In `tutubo_music`, item IDs are opaque strings like `ytm:album:<browseId>`. In `tutubo_youtube`, item IDs are full YouTube URLs. This is deliberate:
+In `tutubo_music`, item IDs are opaque strings such as `ytm:album:<browseId>`. In `tutubo_youtube`, item IDs are full YouTube URLs. This is deliberate:
 
-- `Channel(url)` and `Playlist(url)` take a URL directly — no ID-to-URL mapping needed.
-- `get_stream_details` passes `item_id` straight to yt-dlp, which accepts any YouTube URL — no lookup step.
+- `Channel(url)` and `Playlist(url)` take a URL directly, so no ID-to-URL mapping is needed.
+- `get_stream_details` passes `item_id` straight to yt-dlp, which accepts any YouTube URL, so no lookup step is needed.
 
-The trade-off: item IDs in `tutubo_youtube` are longer but the provider methods are simpler.
+The trade-off: item IDs in `tutubo_youtube` are longer, but the provider methods stay simpler.
 
 ### Package layout
 
@@ -315,7 +315,7 @@ youtube_ma_provider/
     └── manifest.json    # domain: tutubo_youtube
 ```
 
-Both sub-packages are self-contained — they share no code with each other. This is intentional: they use completely different tutubo APIs and MA media types, and keeping them separate makes each file independently readable.
+The two sub-packages are self-contained and share no code with each other. Each one uses a different tutubo API and a different set of MA media types, so keeping them separate keeps each file readable on its own.
 
 ### Dependency graph
 
@@ -343,7 +343,7 @@ cd youtube-ma-provider
 pip install -e .
 ```
 
-If you also want to hack on tutubo itself:
+To also work on tutubo itself:
 
 ```bash
 git clone https://github.com/TigreGotico/tutubo
@@ -356,7 +356,7 @@ pip install -e ../tutubo
 mass-pm
 ```
 
-Changes to the Python source take effect on the next restart — no reinstall needed when installed with `-e`.
+Changes to the Python source take effect on the next restart. No reinstall is needed when the package is installed with `-e`.
 
 ### Adding a new media type
 
@@ -376,7 +376,7 @@ Say you want to support `MediaType.MOVIE` in `tutubo_youtube`:
            tracks.append(v)  # or a separate list if you add a new type
    ```
 
-3. No manifest changes needed — MA infers supported media types from `SUPPORTED_FEATURES` and which `get_*` methods you implement.
+3. No manifest changes are needed. MA infers supported media types from `SUPPORTED_FEATURES` and from which `get_*` methods you implement.
 
 ### Adding a new provider domain
 
@@ -397,7 +397,7 @@ To ship a third provider domain in this package:
 
 ### Key tutubo APIs used
 
-**`YoutubeMusicSearch(query)`** — searches music.youtube.com:
+**`YoutubeMusicSearch(query)`** searches music.youtube.com:
 ```python
 s = YoutubeMusicSearch("Black Sabbath")
 for track in s.iterate_tracks(max_res=10):
@@ -406,7 +406,7 @@ for album in s.iterate_albums(max_res=5):
     print(album.title, album._raw_data.get("browseId"))
 ```
 
-**`YoutubeSearch(query)`** — searches youtube.com:
+**`YoutubeSearch(query)`** searches youtube.com:
 ```python
 s = YoutubeSearch("doom metal")
 for v in s.iterate_videos(max_res=10):
@@ -417,7 +417,7 @@ for pl in s.iterate_playlists(max_res=5):
     print(pl.title, pl.playlist_url)
 ```
 
-**`Channel(url)`** — fetches a channel page:
+**`Channel(url)`** fetches a channel page:
 ```python
 ch = Channel("https://www.youtube.com/@StonedMeadowOfDoom")
 print(ch.channel_name, ch.subscribers)
@@ -427,7 +427,7 @@ for v in ch.live():        # active live streams
     print(v.title)
 ```
 
-**`Playlist(url)`** — fetches a playlist:
+**`Playlist(url)`** fetches a playlist:
 ```python
 pl = Playlist("https://www.youtube.com/playlist?list=PLxxx")
 for v in pl.videos():
@@ -446,12 +446,12 @@ _YTDLP_OPTS = {
 }
 ```
 
-To prefer a specific format (e.g. opus at 160kbps), change `format`:
+To prefer a specific format (for example, opus at 160kbps), change `format`:
 ```python
 "format": "bestaudio[ext=webm]/bestaudio/best"
 ```
 
-yt-dlp is imported lazily inside `_extract_stream_url` and `get_track` — if it is not installed, the provider raises `ProviderUnavailableError` on first use rather than at import time.
+yt-dlp is imported lazily inside `_extract_stream_url` and `get_track`. If it is not installed, the provider raises `ProviderUnavailableError` on first use rather than at import time.
 
 ---
 
@@ -472,7 +472,7 @@ If the dict is empty, the package is not installed or the entrypoints are not re
 
 ### Playback fails / "Could not resolve stream"
 
-yt-dlp is rate-limited by YouTube and occasionally breaks when YouTube updates its player JS. Fix:
+YouTube rate-limits yt-dlp and can break it when YouTube updates its player JS. Fix:
 ```bash
 pip install -U yt-dlp
 ```
@@ -484,15 +484,15 @@ yt-dlp -f bestaudio/best --get-url "https://www.youtube.com/watch?v=<id>"
 
 ### Search returns no results
 
-tutubo scrapes YouTube's public search page. YouTube A/B tests its page structure — if tutubo's parser hits an unknown layout variant it returns nothing. Open an issue at [tutubo](https://github.com/TigreGotico/tutubo) with the search query that fails.
+tutubo scrapes YouTube's public search page. YouTube A/B tests its page structure, and if tutubo's parser hits an unknown layout variant it returns nothing. Open an issue at [tutubo](https://github.com/TigreGotico/tutubo) with the search query that fails.
 
 ### Channel artist page is slow to load
 
-`Channel(url)` scrapes the channel page on every call. A channel with many videos may take 2–5 seconds. This is a network round-trip to YouTube, not a code bug. Upstream caching in tutubo or MA would be the fix.
+`Channel(url)` scrapes the channel page on every call. A channel with many videos can take 2-5 seconds to load. This is a network round trip to YouTube, not a code bug. Caching upstream, in tutubo or MA, would fix it.
 
 ### Audiobooks / podcasts not appearing in search
 
-Content-type classification is heuristic. A video titled "Full Album" on a metal channel may classify as `MUSIC_AUDIO` rather than `AUDIOBOOK`. The classifier looks at title keywords, description, and channel tags — if all three are ambiguous, it defaults to the most common type for that channel.
+Content-type classification is heuristic. A video titled "Full Album" on a metal channel may classify as `MUSIC_AUDIO` instead of `AUDIOBOOK`. The classifier checks title keywords, description, and channel tags. If all three are ambiguous, it defaults to the most common type for that channel.
 
 To debug classification directly:
 ```python
@@ -503,4 +503,4 @@ print(ct)  # ContentType.AUDIOBOOK
 
 ### YouTube Music results differ from the website
 
-YouTube Music's API (via `ytmusicapi`) may return different results than the website depending on region. tutubo's `_get_ytmus()` initialises `ytmusicapi` in unauthenticated mode, which may exclude region-locked content.
+YouTube Music's API (through `ytmusicapi`) can return different results than the website, depending on region. tutubo's `_get_ytmus()` initializes `ytmusicapi` in unauthenticated mode, which can exclude region-locked content.
