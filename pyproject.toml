@@ -7,7 +7,14 @@ name = "youtube-ma-provider"
 version = "0.2.0"
 description = "YouTube and YouTube Music providers for Music Assistant via tutubo and yt-dlp"
 requires-python = ">=3.11"
-dependencies = ["music-assistant-plugin-manager", "tutubo", "yt-dlp"]
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "music-assistant-plugin-manager",
+    "music-assistant-models>=1.1.206",
+    "tutubo>=4.3.1a2",
+    "yt-dlp>=2026.8.30.232658.dev0",
+]
 
 [project.entry-points."music_assistant.provider"]
 tutubo_music   = "youtube_ma_provider.ytmusic"
@@ -19,3 +26,4 @@ include = ["youtube_ma_provider*"]
 [tool.setuptools.package-data]
 "youtube_ma_provider.ytmusic" = ["manifest.json"]
 "youtube_ma_provider.youtube" = ["manifest.json"]
+
