@@ -382,9 +382,12 @@ class YouTubeMusicProvider(MusicProvider):
         def _meta():
             import yt_dlp  # noqa: PLC0415
             opts = {"quiet": True, "no_warnings": True, "skip_download": True}
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(prov_track_id, download=False) or {}
-                return info.get("title") or prov_track_id, info.get("thumbnail")
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(prov_track_id, download=False) or {}
+                    return info.get("title") or prov_track_id, info.get("thumbnail")
+            except Exception as exc:
+                raise MediaNotFoundError(f"yt-dlp could not resolve track: {prov_track_id}") from exc
 
         title, thumb = await asyncio.to_thread(_meta)
         track = Track(
