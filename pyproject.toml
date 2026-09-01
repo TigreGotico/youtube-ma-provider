@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youtube-ma-provider"
-version = "0.2.0"
+dynamic = ["version"]
 description = "YouTube and YouTube Music providers for Music Assistant via tutubo and yt-dlp"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = [
@@ -19,6 +19,9 @@ dependencies = [
 [project.entry-points."music_assistant.provider"]
 tutubo_music   = "youtube_ma_provider.ytmusic"
 tutubo_youtube = "youtube_ma_provider.youtube"
+
+[tool.setuptools.dynamic]
+version = { attr = "youtube_ma_provider.version.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["youtube_ma_provider*"]

@@ -1,0 +1,12 @@
+name: Release Preview
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  release_preview:
+    uses: OpenVoiceOS/gh-automations/.github/workflows/release-preview.yml@dev
+    with:
+      version_file: "youtube_ma_provider/version.py"
+    secrets: inherit
