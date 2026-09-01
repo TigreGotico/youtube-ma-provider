@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     types: [closed]
-    branches: [master]
+    branches: [dev]
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
       PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
       MATRIX_TOKEN: ${{ secrets.MATRIX_TOKEN }}
     with:
-      branch: 'master'
+      branch: 'dev'
       version_file: 'youtube_ma_provider/version.py'
       update_changelog: true
       publish_prerelease: true
